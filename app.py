@@ -9,14 +9,14 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from helpers import apology, login_required, lookup, usd
 
-# PART OF DISTRIBUTION CODE!Configure application
+# Configure application
 app = Flask(__name__)
 
-# PART OF DISTRIBUTION CODE!Ensure templates are auto-reloaded
+# Ensure templates are auto-reloaded
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
-# PART OF DISTRIBUTION CODE!Ensure responses aren't cached
+# Ensure responses aren't cached
 @app.after_request
 def after_request(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -25,19 +25,19 @@ def after_request(response):
     return response
 
 
-# PART OF DISTRIBUTION CODE!Custom filter
+# Custom filter
 app.jinja_env.filters["usd"] = usd
 
-# PART OF DISTRIBUTION CODE!Configure session to use filesystem (instead of signed cookies)
+# Configure session to use filesystem (instead of signed cookies)
 app.config["SESSION_FILE_DIR"] = mkdtemp()
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
 
-# PART OF DISTRIBUTION CODE!Configure CS50 Library to use SQLite database
+# Configure CS50 Library to use SQLite database
 db = SQL("sqlite:///finance.db")
 
-# PART OF DISTRIBUTION CODE!Make sure API key is set pk_d79f79be97ee48bc91d6ab0eec4e65e8
+# Make sure API key is set pk_d79f79be97ee48bc91d6ab0eec4e65e8
 if not os.environ.get("API_KEY"):
     raise RuntimeError("API_KEY not set")
 
@@ -53,6 +53,7 @@ def index():
     # Define totals
     totalcash = current_cash
     totalprice = 0
+    
     # Collect data for symbol, shares, total etc
     for item in data:
         symbol = item["symbol"]
@@ -66,7 +67,6 @@ def index():
     balance = totalcash + totalprice
     return render_template("index.html", data=data, totalcash=totalcash, balance=balance)
 
-
 @app.route("/buy", methods=["GET", "POST"])
 @login_required
 def buy():
@@ -76,32 +76,37 @@ def buy():
         # Define variables
         user = session["user_id"]
         symbol = request.form.get("symbol")
-        shares = float(request.form.get("shares"))
+        shares = request.form.get("shares")
         quote = lookup(symbol)
-        purchase = lookup(symbol)["price"] * shares
-        current_cash = db.execute("SELECT cash FROM users WHERE id = ?", user)
         
         # Check validity
         if not symbol:
             return apology("must provide symbol", 403)
+        elif not quote:
+            return apology("Invalid symbol", 400)
         elif not shares:
             return apology("must provide share amount", 403)
-        elif not quote:
-            return apology("Invalid symbol", 403)
-        elif not shares > 0:
-            return apology("Invalid amount", 403)
-        elif not purchase <= current_cash[0]["cash"]:
-            return apology("not enough cash", 403)
+        elif not shares.isdigit():
+            return apology("Invalid amount", 400)
         else:
-            # Record purchase in transactions:
-            db.execute("INSERT INTO transactions (user_id, symbol, shares, time, type) VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'bought')", user, symbol, shares)
-            # Take money out
-            rows = db.execute("SELECT cash FROM users WHERE id = ?", user)
-            cash = rows[0]["cash"]
-            db.execute("UPDATE users SET cash = ? WHERE id = ?", cash - purchase, user)
-            # Update portfolio
-            db.execute("INSERT INTO portfolio (user_id, symbol, shares) VALUES(?, ?, ?) ON CONFLICT(symbol) DO UPDATE SET shares = shares + ?", user, symbol, shares, shares)
-            return redirect("/")
+            # Check for money
+            purchase = lookup(symbol)["price"] * float(shares)
+            current_cash = db.execute("SELECT cash FROM users WHERE id = ?", user)
+            
+            if not purchase <= current_cash[0]["cash"]:
+                return apology("not enough cash", 403)
+            else:
+                # Record purchase in transactions:
+                db.execute("INSERT INTO transactions (user_id, symbol, shares, time, type, price) VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'bought', ?)", 
+                           user, symbol, shares, quote["price"])
+                # Take money out
+                rows = db.execute("SELECT cash FROM users WHERE id = ?", user)
+                cash = rows[0]["cash"]
+                db.execute("UPDATE users SET cash = ? WHERE id = ?", cash - purchase, user)
+                # Update portfolio
+                db.execute("INSERT INTO portfolio (user_id, symbol, shares) VALUES(?, ?, ?) ON CONFLICT(symbol) DO UPDATE SET shares = shares + ?", 
+                           user, symbol, shares, shares)
+                return redirect("/")
     else:
         # Buy share
         return render_template("buy.html")
@@ -111,9 +116,12 @@ def buy():
 @login_required
 def history():
     """Show history of transactions"""
-    return apology("TODO")
+    user = session["user_id"]
+    transactions = db.execute("SELECT * FROM transactions WHERE user_id = ?", user)
+    
+    return render_template("history.html", transactions=transactions)
 
-# PART OF DISTRIBUTION CODE!
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     """Log user in"""
@@ -149,7 +157,7 @@ def login():
     else:
         return render_template("login.html")
 
-#PART OF DISTRIBUTION CODE!
+
 @app.route("/logout")
 def logout():
     """Log user out"""
@@ -169,16 +177,14 @@ def quote():
         symbol = request.form.get("symbol")
         quote = lookup(symbol)
         if not symbol:
-            return apology("must provide symbol", 403)
+            return apology("must provide symbol", 400)
         elif not quote:
-            return apology("invalid symbol", 403)
+            return apology("invalid symbol", 400)
             
         return render_template("quoted.html", quote=quote)
         
     else:
         return render_template("quote.html")
-    
-    return apology("TODO")
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -195,22 +201,22 @@ def register():
 
         # Ensure username was submitted
         if not username:
-            return apology("must provide username", 403)
+            return apology("must provide username", 400)
 
         # Ensure password was submitted
         elif not password:
-            return apology("must provide password", 403)
+            return apology("must provide password", 400)
         
         # Ensure password is confirmed
         elif not confirmation:
-            return apology("must confirm password", 403)
+            return apology("must confirm password", 400)
             
         # Ensure the two passwords match
         elif password != confirmation:
-            return apology("password does not match", 403)
+            return apology("password does not match", 400)
             
         # Check if username already exists    
-        rows = db.execute("SELECT * FROM users WHERE username = :username", username = username)
+        rows = db.execute("SELECT * FROM users WHERE username = :username", username=username)
         if len(rows) == 0:
 
             # Hash password
@@ -223,17 +229,50 @@ def register():
         
         else:
             # If username taken
-            return apology("username taken", 403)
+            return apology("username taken", 400)
     
     # User reached route via GET         
     else:
         return render_template("register.html")
+        
+        
+@app.route("/change_pass", methods=["GET", "POST"])
+@login_required
+def change_pass():
+    if request.method == "POST":
+        # Define inputs
+        user = session["user_id"]
+        old = request.form.get("old")
+        new = request.form.get("new")
+        repeat = request.form.get("repeat")
+        settings = db.execute("SELECT * FROM users WHERE id = ?", user)
+        
+        # Check validity
+        if not old:
+            return apology("must provide password", 403)
+        elif not new:
+            return apology("must provide password", 403)
+        elif not repeat:
+            return apology("must provide password", 403)
+        elif new != repeat:
+            return apology("password does not match", 403)
+        elif not check_password_hash(settings[0]["hash"], request.form.get("old")):
+            return apology("wrong password", 403)
+        else:
+            # Change password
+            new_hash = generate_password_hash(new)
+            db.execute("UPDATE users SET hash = ? WHERE id = ?", new_hash, user)
+            return redirect("/")
+    else:
+        return render_template("settings.html")
 
 
 @app.route("/sell", methods=["GET", "POST"])
 @login_required
 def sell():
     """Sell shares of stock"""
+    user = session["user_id"]
+    wallet = db.execute("SELECT symbol, shares FROM portfolio WHERE user_id = ?", user)
     if request.method == "POST":
         
         # Define variables
@@ -250,9 +289,9 @@ def sell():
         elif not shares:
             return apology("must provide share amount", 403)
         elif not shares > 0:
-            return apology("Invalid amount", 403)
+            return apology("Invalid amount", 400)
         elif shares > wallet[0]["shares"]:
-            return apology("not enough shares", 403)
+            return apology("not enough shares", 400)
         else:
             # Add money to user's balance
             rows = db.execute("SELECT cash FROM users WHERE id = ?", user)
@@ -262,13 +301,14 @@ def sell():
             totshares = wallet[0]["shares"]
             db.execute("UPDATE portfolio SET shares = ? WHERE user_id = ? AND symbol = ?", totshares - shares, user, symbol)
             # Record transaction
-            db.execute("INSERT INTO transactions (user_id, symbol, shares, time, type) VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'sold')", user, symbol, shares)
+            db.execute("INSERT INTO transactions (user_id, symbol, shares, time, type, price) VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'sold', ?)", 
+                       user, symbol, shares, quote["price"])
             return redirect("/")
     else:
         # Sell shares
         return render_template("sell.html", wallet=wallet)
 
-#PART OF DISTRIBUTION CODE!
+
 def errorhandler(e):
     """Handle error"""
     if not isinstance(e, HTTPException):
@@ -276,6 +316,6 @@ def errorhandler(e):
     return apology(e.name, e.code)
 
 
-# PART OF DISTRIBUTION CODE!Listen for errors
+# Listen for errors
 for code in default_exceptions:
     app.errorhandler(code)(errorhandler)
